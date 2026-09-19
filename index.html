@@ -1,3 +1,5 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ひろば掲示板</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -258,8 +260,12 @@
   <p class="foot">書き込みはこの掲示板を開ける人全員に見えます。個人情報やパスワードは書かないでください。</p>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (() => {
+  const SUPABASE_URL = "https://mfutcflbulazoursgbei.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_YYw5JOn4IgGG31l0S-IC-g_Jtp31MTl";
+
   const app = document.getElementById("app");
   const modeEl = document.getElementById("mode");
   const noticeEl = document.getElementById("notice");
@@ -304,6 +310,13 @@
   function cleanPost(p) {
     return { id: p.id, threadId: str(p.threadId, 200), name: str(p.name, 24), body: str(p.body, 2000), createdAt: num(p.createdAt) };
   }
+  // Supabaseの行（id/created_at/thread_id）を、アプリ内の形に詰め替える
+  function fromSbThread(row) {
+    return cleanThread({ id: String(row.id), title: row.title, name: row.name, createdAt: Date.parse(row.created_at) || Date.now() });
+  }
+  function fromSbPost(row) {
+    return cleanPost({ id: String(row.id), threadId: String(row.thread_id), name: row.name, body: row.body, createdAt: Date.parse(row.created_at) || Date.now() });
+  }
   function postsOf(id) {
     return posts
       .filter((p) => p.threadId === id)
@@ -311,7 +324,11 @@
   }
 
   function errMsg(e) {
-    switch (e && e.code) {
+    const code = e && (e.code || e.pgCode);
+    switch (code) {
+      case "23514": return "文字数が多すぎるか、内容が条件を満たしていません。短くしてもう一度お試しください。";
+      case "23503": return "このスレッドは見つかりませんでした。削除された可能性があります。一覧から選び直してください。";
+      case "network": return "通信エラーです。ネットワーク接続を確かめて、もう一度お試しください。";
       case "quota_exceeded": return "保存できる件数の上限に達しました。古いスレッドを整理してから書き込んでください。";
       case "invalid_argument": return "この共有設定では書き込めません（閲覧のみになっています）。";
       case "resource_exhausted": return "書き込みが混み合っています。少し待ってからもう一度どうぞ。";
@@ -327,7 +344,7 @@
   async function retryOnce(fn) {
     try { return await fn(); }
     catch (e) {
-      if (e && e.code === "unavailable") {
+      if (e && (e.code === "unavailable" || e.code === "network")) {
         await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
         return fn();
       }
@@ -335,25 +352,41 @@
     }
   }
 
-  function makeDbStore(db) {
+  // Supabaseの {data, error} 応答を、成功ならdataだけ、失敗なら投げる形にそろえる
+  async function sb(promise) {
+    let res;
+    try { res = await promise; }
+    catch { throw { code: "network" }; }
+    if (res.error) throw { code: res.error.code || "unknown", message: res.error.message };
+    return res.data;
+  }
+
+  function makeSupabaseStore(client) {
     return {
       shared: true,
       subscribe(onThreads, onPosts, onError) {
-        db.collection("threads").orderBy("createdAt", "desc").limit(300)
-          .onSnapshot((s) => onThreads(s.docs.map((d) => cleanThread({ id: d.id, ...d.data() }))), onError);
-        db.collection("posts").orderBy("createdAt", "desc").limit(1000)
-          .onSnapshot((s) => onPosts(s.docs.map((d) => cleanPost({ id: d.id, ...d.data() }))), onError);
+        const loadThreads = () => sb(client.from("threads").select("*").order("created_at", { ascending: false }).limit(300))
+          .then((rows) => onThreads(rows.map(fromSbThread)))
+          .catch((e) => onError && onError(e));
+        const loadPosts = () => sb(client.from("posts").select("*").order("created_at", { ascending: false }).limit(1000))
+          .then((rows) => onPosts(rows.map(fromSbPost)))
+          .catch((e) => onError && onError(e));
+        loadThreads();
+        loadPosts();
+        // 誰かの書き込みをリアルタイムで拾って、全体を読み直す（差分マージはしない、素朴な作り）
+        client
+          .channel("hiroba-bbs")
+          .on("postgres_changes", { event: "*", schema: "public", table: "threads" }, loadThreads)
+          .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, loadPosts)
+          .subscribe();
       },
       async addThread(thread, first) {
-        const tRef = db.collection("threads").doc();
-        const pRef = db.collection("posts").doc();
-        await retryOnce(() => tRef.set(thread));
-        await retryOnce(() => pRef.set({ ...first, threadId: tRef.id }));
-        return tRef.id;
+        const row = await retryOnce(() => sb(client.from("threads").insert({ title: thread.title, name: thread.name }).select().single()));
+        await retryOnce(() => sb(client.from("posts").insert({ thread_id: row.id, name: first.name, body: first.body })));
+        return String(row.id);
       },
       async addPost(post) {
-        const ref = db.collection("posts").doc();
-        await retryOnce(() => ref.set(post));
+        await retryOnce(() => sb(client.from("posts").insert({ thread_id: Number(post.threadId), name: post.name, body: post.body })));
       },
     };
   }
@@ -622,11 +655,16 @@
   // ---- boot ------------------------------------------------------------
   async function boot() {
     route();
-    let db = null;
+    let client = null;
     try {
-      if (window.claude && typeof window.claude.use === "function") db = await window.claude.use("db");
-    } catch { db = null; }
-    store = db ? makeDbStore(db) : makeLocalStore();
+      if (window.supabase && typeof window.supabase.createClient === "function") {
+        const c = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // 実際に1件読めるかで疎通確認（キーが古い・オフラインなどをここで弾く）
+        const { error } = await c.from("threads").select("id", { head: true, count: "exact" }).limit(1);
+        if (!error) client = c;
+      }
+    } catch { client = null; }
+    store = client ? makeSupabaseStore(client) : makeLocalStore();
     modeEl.textContent = store.shared ? "みんなで共有中" : "この端末だけに保存（お試しモード）";
     modeEl.classList.toggle("shared", store.shared);
 
