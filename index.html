@@ -1,0 +1,644 @@
+<title>ひろば掲示板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Dela+Gothic+One&display=swap">
+<style>
+  :root {
+    --bg: #eef1ec;
+    --surface: #fbfcfa;
+    --field: #ffffff;
+    --ink: #1b221e;
+    --muted: #5d6a62;
+    --line: #d5ddd7;
+    --name: #16733b;
+    --link: #2352b0;
+    --title: #a8322a;
+    --accent: #1f4f3a;
+    --accent-ink: #ffffff;
+    --hl: #fff1b8;
+    --danger: #b3261e;
+    --font: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+    --display: "Dela Gothic One", "BIZ UDPGothic", "Hiragino Sans", sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #131916;
+      --surface: #1b231f;
+      --field: #151c18;
+      --ink: #e3ebe6;
+      --muted: #98a69e;
+      --line: #2d3a33;
+      --name: #62cf8d;
+      --link: #93b4ff;
+      --title: #ff8a7a;
+      --accent: #7fd3a4;
+      --accent-ink: #0f1a14;
+      --hl: #3b3517;
+      --danger: #ff8a80;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #131916;
+    --surface: #1b231f;
+    --field: #151c18;
+    --ink: #e3ebe6;
+    --muted: #98a69e;
+    --line: #2d3a33;
+    --name: #62cf8d;
+    --link: #93b4ff;
+    --title: #ff8a7a;
+    --accent: #7fd3a4;
+    --accent-ink: #0f1a14;
+    --hl: #3b3517;
+    --danger: #ff8a80;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 20px 64px;
+    display: grid;
+    gap: 20px;
+  }
+  a { color: var(--link); }
+  :focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+  /* header */
+  .top {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 16px;
+    flex-wrap: wrap;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .logo {
+    font-family: var(--display);
+    font-size: 28px;
+    line-height: 1.2;
+    color: var(--ink);
+    text-decoration: none;
+    letter-spacing: 0.02em;
+  }
+  .mode {
+    font-size: 12px;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mode::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .mode.shared::before { background: var(--name); }
+  .notice {
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--danger);
+    border-radius: 6px;
+    color: var(--danger);
+    font-size: 13px;
+  }
+
+  /* shared bits */
+  h1, h2 { margin: 0; text-wrap: balance; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 15px; }
+  .sub { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+  .btn {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn.ghost { background: transparent; color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  .form {
+    display: grid;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .field { display: grid; gap: 4px; }
+  .field label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
+  input, textarea {
+    font: inherit;
+    color: var(--ink);
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  textarea { min-height: 112px; resize: vertical; }
+  .name-field { max-width: 240px; }
+  .row { display: flex; gap: 8px 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .actions { display: flex; gap: 8px; margin-left: auto; }
+  .err { margin: 0; color: var(--danger); font-size: 13px; }
+  .hint { margin: 0; color: var(--muted); font-size: 12px; }
+
+  /* thread list */
+  .list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .threads {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .threads li + li { border-top: 1px solid var(--line); }
+  .threads a {
+    display: grid;
+    grid-template-columns: 2.2em 1fr;
+    gap: 2px 8px;
+    padding: 12px 16px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .threads a:hover .t-title { text-decoration: underline; }
+  .t-rank { grid-row: span 2; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .t-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .t-title { font-weight: 700; color: var(--link); overflow-wrap: anywhere; }
+  .t-count { font-weight: 700; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .t-new {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--title);
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0 6px;
+    line-height: 1.5;
+  }
+  .t-meta { font-size: 12px; color: var(--muted); }
+  .empty { padding: 20px 16px; color: var(--muted); }
+
+  /* thread view */
+  .back { font-size: 13px; justify-self: start; }
+  .thread {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 20px 8px;
+    display: grid;
+    gap: 8px;
+  }
+  .thread-title { font-size: 20px; color: var(--title); overflow-wrap: anywhere; }
+  .posts { display: grid; }
+  .post {
+    padding: 10px 8px;
+    margin-inline: -8px;
+    border-radius: 6px;
+    scroll-margin-top: 24px;
+    transition: background-color 0.6s;
+  }
+  .post.flash { background: var(--hl); }
+  .post-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; }
+  .no {
+    font: inherit;
+    font-weight: 700;
+    color: var(--ink);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .name { color: var(--name); font-weight: 700; overflow-wrap: anywhere; }
+  .date { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .body { margin: 4px 0 0 1.4em; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .foot { font-size: 12px; color: var(--muted); margin: 0; }
+
+  @media (max-width: 480px) {
+    .logo { font-size: 24px; }
+    .thread { padding-inline: 14px; }
+    .body { margin-left: 0.6em; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .post { transition: none; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="#/">ひろば掲示板</a>
+    <span class="mode" id="mode">接続中…</span>
+  </header>
+  <p class="notice" id="notice" role="alert" hidden></p>
+  <main id="app" class="wrap" style="padding:0"></main>
+  <p class="foot">書き込みはこの掲示板を開ける人全員に見えます。個人情報やパスワードは書かないでください。</p>
+</div>
+
+<script>
+(() => {
+  const app = document.getElementById("app");
+  const modeEl = document.getElementById("mode");
+  const noticeEl = document.getElementById("notice");
+  const DEFAULT_NAME = "名無しさん";
+  const NAME_KEY = "hiroba-name";
+  const WEEK = "日月火水木金土";
+  const reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let store = null;
+  let threads = [];
+  let posts = [];
+  let loaded = false;
+  let view = null;
+
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const num = (v) => (typeof v === "number" && isFinite(v) ? v : 0);
+  const str = (v, max) => String(v ?? "").slice(0, max);
+  const pad = (n) => String(n).padStart(2, "0");
+
+  function fmtDate(ms) {
+    const d = new Date(ms);
+    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}(${WEEK[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  function ago(ms) {
+    const s = (Date.now() - ms) / 1000;
+    if (s < 60) return "たった今";
+    if (s < 3600) return `${Math.floor(s / 60)}分前`;
+    if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
+    if (s < 86400 * 7) return `${Math.floor(s / 86400)}日前`;
+    const d = new Date(ms);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  }
+  function renderBody(text) {
+    return esc(text).replace(/&gt;&gt;(\d{1,4})/g, (_, n) => `<a class="anchor" href="#p-${n}" data-no="${n}">&gt;&gt;${n}</a>`);
+  }
+
+  function cleanThread(t) {
+    return { id: t.id, title: str(t.title, 60) || "(無題)", name: str(t.name, 24), createdAt: num(t.createdAt) };
+  }
+  function cleanPost(p) {
+    return { id: p.id, threadId: str(p.threadId, 200), name: str(p.name, 24), body: str(p.body, 2000), createdAt: num(p.createdAt) };
+  }
+  function postsOf(id) {
+    return posts
+      .filter((p) => p.threadId === id)
+      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+  }
+
+  function errMsg(e) {
+    switch (e && e.code) {
+      case "quota_exceeded": return "保存できる件数の上限に達しました。古いスレッドを整理してから書き込んでください。";
+      case "invalid_argument": return "この共有設定では書き込めません（閲覧のみになっています）。";
+      case "resource_exhausted": return "書き込みが混み合っています。少し待ってからもう一度どうぞ。";
+      case "revoked":
+      case "not_granted":
+      case "capability_disabled":
+      case "capability_removed": return "掲示板との接続が切れました。ページを再読み込みしてください。";
+      default: return "書き込めませんでした。通信状態を確かめて、もう一度お試しください。";
+    }
+  }
+
+  // ---- stores ----------------------------------------------------------
+  async function retryOnce(fn) {
+    try { return await fn(); }
+    catch (e) {
+      if (e && e.code === "unavailable") {
+        await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
+        return fn();
+      }
+      throw e;
+    }
+  }
+
+  function makeDbStore(db) {
+    return {
+      shared: true,
+      subscribe(onThreads, onPosts, onError) {
+        db.collection("threads").orderBy("createdAt", "desc").limit(300)
+          .onSnapshot((s) => onThreads(s.docs.map((d) => cleanThread({ id: d.id, ...d.data() }))), onError);
+        db.collection("posts").orderBy("createdAt", "desc").limit(1000)
+          .onSnapshot((s) => onPosts(s.docs.map((d) => cleanPost({ id: d.id, ...d.data() }))), onError);
+      },
+      async addThread(thread, first) {
+        const tRef = db.collection("threads").doc();
+        const pRef = db.collection("posts").doc();
+        await retryOnce(() => tRef.set(thread));
+        await retryOnce(() => pRef.set({ ...first, threadId: tRef.id }));
+        return tRef.id;
+      },
+      async addPost(post) {
+        const ref = db.collection("posts").doc();
+        await retryOnce(() => ref.set(post));
+      },
+    };
+  }
+
+  function sampleData() {
+    const now = Date.now();
+    const m = (min) => now - min * 60000;
+    return {
+      threads: [
+        { id: "s-guide", title: "はじめに：この掲示板の使い方", name: "管理人", createdAt: m(300) },
+        { id: "s-lunch", title: "今日のお昼ごはん報告スレ", name: DEFAULT_NAME, createdAt: m(200) },
+        { id: "s-bgm", title: "おすすめの作業用BGMを教えてください", name: "やまだ", createdAt: m(95) },
+      ],
+      posts: [
+        { id: "s1", threadId: "s-guide", name: "管理人", createdAt: m(300), body: "ようこそ、ひろば掲示板へ。\n\n・スレッドを立てる：一覧の右上のボタンから\n・返信する：スレッドの一番下のフォームから\n・特定の書き込みに返事：番号をクリックすると >>番号 が入ります\n\n名前が空欄なら「名無しさん」になります。" },
+        { id: "s2", threadId: "s-guide", name: DEFAULT_NAME, createdAt: m(280), body: "テスト書き込み" },
+        { id: "s3", threadId: "s-guide", name: DEFAULT_NAME, createdAt: m(150), body: ">>1\n番号クリックで返信できるの便利ですね" },
+        { id: "s4", threadId: "s-lunch", name: DEFAULT_NAME, createdAt: m(200), body: "食べたものを書いていくスレです。\n自分は駅前のそば屋でかき揚げそば。" },
+        { id: "s5", threadId: "s-lunch", name: "たなか", createdAt: m(120), body: "コンビニのおにぎり2個。鮭と昆布。" },
+        { id: "s6", threadId: "s-lunch", name: DEFAULT_NAME, createdAt: m(60), body: ">>5\n鮭と昆布は鉄板" },
+        { id: "s7", threadId: "s-lunch", name: "やまだ", createdAt: m(12), body: "社食のカレー。金曜はカツが乗る日" },
+        { id: "s8", threadId: "s-bgm", name: "やまだ", createdAt: m(95), body: "集中したいときに聴いているものがあれば教えてください。歌詞なしだとうれしいです。" },
+        { id: "s9", threadId: "s-bgm", name: DEFAULT_NAME, createdAt: m(40), body: "雨の音だけ流すのがおすすめ。意外と捗ります" },
+      ],
+    };
+  }
+
+  function makeLocalStore() {
+    const KEY = "hiroba-bbs-v1";
+    let data = null;
+    try { data = JSON.parse(lsGet(KEY) || "null"); } catch {}
+    if (!data || !Array.isArray(data.threads) || !Array.isArray(data.posts)) data = sampleData();
+    const subs = [];
+    const emit = () => subs.forEach(([a, b]) => { a(data.threads.map(cleanThread)); b(data.posts.map(cleanPost)); });
+    const save = () => lsSet(KEY, JSON.stringify(data));
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    window.addEventListener("storage", (e) => {
+      if (e.key !== KEY || !e.newValue) return;
+      try { data = JSON.parse(e.newValue); emit(); } catch {}
+    });
+    return {
+      shared: false,
+      subscribe(a, b) { subs.push([a, b]); emit(); },
+      async addThread(thread, first) {
+        const id = uid();
+        data.threads.push({ id, ...thread });
+        data.posts.push({ id: uid(), ...first, threadId: id });
+        save(); emit();
+        return id;
+      },
+      async addPost(post) {
+        data.posts.push({ id: uid(), ...post });
+        save(); emit();
+      },
+    };
+  }
+
+  // ---- views -----------------------------------------------------------
+  function bindCtrlEnter(textarea, form) {
+    textarea.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); }
+    });
+  }
+
+  async function submitWith(button, errEl, label, fn) {
+    if (!store) { errEl.textContent = "準備中です。少し待ってからもう一度お試しください。"; return; }
+    button.disabled = true;
+    button.textContent = "送信中…";
+    errEl.textContent = "";
+    try { await fn(); }
+    catch (e) { errEl.textContent = errMsg(e); }
+    finally { button.disabled = false; button.textContent = label; }
+  }
+
+  function renderList() {
+    app.innerHTML = `
+      <div class="list-head">
+        <h1>スレッド一覧<span class="sub" id="list-sub"></span></h1>
+        <button class="btn" id="toggle-new" type="button" aria-expanded="false" aria-controls="new-thread">スレッドを立てる</button>
+      </div>
+      <form class="form" id="new-thread" hidden novalidate>
+        <h2>新しいスレッド</h2>
+        <div class="field"><label for="nt-title">タイトル</label><input id="nt-title" maxlength="60" placeholder="例：おすすめの本を教えて"></div>
+        <div class="field name-field"><label for="nt-name">名前</label><input id="nt-name" maxlength="24" placeholder="${DEFAULT_NAME}"></div>
+        <div class="field"><label for="nt-body">本文</label><textarea id="nt-body" maxlength="2000"></textarea></div>
+        <div class="row">
+          <p class="err" id="nt-err" role="alert"></p>
+          <div class="actions">
+            <button type="button" class="btn ghost" id="nt-cancel">やめる</button>
+            <button type="submit" class="btn" id="nt-submit">立てる</button>
+          </div>
+        </div>
+      </form>
+      <ol class="threads" id="threads"></ol>`;
+
+    const form = app.querySelector("#new-thread");
+    const toggle = app.querySelector("#toggle-new");
+    const title = form.querySelector("#nt-title");
+    const name = form.querySelector("#nt-name");
+    const body = form.querySelector("#nt-body");
+    const err = form.querySelector("#nt-err");
+    const submit = form.querySelector("#nt-submit");
+    name.value = lsGet(NAME_KEY) || "";
+
+    const setOpen = (open) => {
+      form.hidden = !open;
+      toggle.hidden = open;
+      toggle.setAttribute("aria-expanded", String(open));
+      if (open) title.focus(); else toggle.focus();
+    };
+    toggle.addEventListener("click", () => setOpen(true));
+    form.querySelector("#nt-cancel").addEventListener("click", () => setOpen(false));
+    bindCtrlEnter(body, form);
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const t = title.value.trim();
+      const b = body.value.trim();
+      if (!t) { err.textContent = "タイトルを入力してください。"; title.focus(); return; }
+      if (!b) { err.textContent = "本文を入力してください。"; body.focus(); return; }
+      const n = name.value.trim() || DEFAULT_NAME;
+      lsSet(NAME_KEY, name.value.trim());
+      const now = Date.now();
+      submitWith(submit, err, "立てる", async () => {
+        const id = await store.addThread({ title: t, name: n, createdAt: now }, { name: n, body: b, createdAt: now });
+        location.hash = "#/t/" + id;
+      });
+    });
+
+    view = { update: updateList };
+    updateList();
+  }
+
+  function updateList() {
+    const list = app.querySelector("#threads");
+    const sub = app.querySelector("#list-sub");
+    if (!list) return;
+    if (!loaded) { list.innerHTML = `<li class="empty">読み込み中…</li>`; return; }
+
+    const stats = new Map();
+    for (const p of posts) {
+      const s = stats.get(p.threadId) || { count: 0, last: 0, lastName: "" };
+      s.count++;
+      if (p.createdAt >= s.last) { s.last = p.createdAt; s.lastName = p.name; }
+      stats.set(p.threadId, s);
+    }
+    const rows = threads
+      .map((t) => ({ t, s: stats.get(t.id) || { count: 0, last: t.createdAt, lastName: t.name } }))
+      .sort((a, b) => b.s.last - a.s.last);
+
+    sub.textContent = `${rows.length}件`;
+    if (!rows.length) {
+      list.innerHTML = `<li class="empty">まだスレッドがありません。右上のボタンから最初のスレッドを立ててみましょう。</li>`;
+      return;
+    }
+    list.innerHTML = rows.map(({ t, s }, i) => {
+      const fresh = Date.now() - s.last < 3600000;
+      return `<li><a href="#/t/${encodeURIComponent(t.id)}">
+        <span class="t-rank">${i + 1}:</span>
+        <span class="t-line"><span class="t-title">${esc(t.title)}</span><span class="t-count">(${s.count})</span>${fresh ? '<span class="t-new">new</span>' : ""}</span>
+        <span class="t-meta">最終書き込み ${ago(s.last)}・${esc(s.lastName || DEFAULT_NAME)}</span>
+      </a></li>`;
+    }).join("");
+  }
+
+  function renderThread(id) {
+    app.innerHTML = `
+      <a class="back" href="#/">← スレッド一覧へ</a>
+      <article class="thread">
+        <h1 class="thread-title" id="th-title">読み込み中…</h1>
+        <div class="posts" id="posts"></div>
+      </article>
+      <form class="form" id="reply" novalidate>
+        <h2>このスレッドに書き込む</h2>
+        <div class="field name-field"><label for="rp-name">名前</label><input id="rp-name" maxlength="24" placeholder="${DEFAULT_NAME}"></div>
+        <div class="field"><label for="rp-body">本文</label><textarea id="rp-body" maxlength="2000"></textarea></div>
+        <div class="row">
+          <p class="hint">番号をクリックすると &gt;&gt;番号 で返信できます。Ctrl+Enter でも送信。</p>
+          <button type="submit" class="btn" id="rp-submit">書き込む</button>
+        </div>
+        <p class="err" id="rp-err" role="alert"></p>
+      </form>`;
+
+    const postsEl = app.querySelector("#posts");
+    const form = app.querySelector("#reply");
+    const name = form.querySelector("#rp-name");
+    const body = form.querySelector("#rp-body");
+    const err = form.querySelector("#rp-err");
+    const submit = form.querySelector("#rp-submit");
+    name.value = lsGet(NAME_KEY) || "";
+    bindCtrlEnter(body, form);
+
+    postsEl.addEventListener("click", (e) => {
+      const no = e.target.closest(".no");
+      if (no) {
+        const prefix = body.value && !body.value.endsWith("\n") ? "\n" : "";
+        body.value += `${prefix}>>${no.dataset.no}\n`;
+        body.focus();
+        return;
+      }
+      const anchor = e.target.closest(".anchor");
+      if (anchor) {
+        e.preventDefault();
+        const target = document.getElementById("p-" + anchor.dataset.no);
+        if (!target) return;
+        target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+        target.classList.add("flash");
+        setTimeout(() => target.classList.remove("flash"), 1600);
+      }
+    });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const b = body.value.trim();
+      if (!b) { err.textContent = "本文を入力してください。"; body.focus(); return; }
+      lsSet(NAME_KEY, name.value.trim());
+      const post = { threadId: id, name: name.value.trim() || DEFAULT_NAME, body: b, createdAt: Date.now() };
+      submitWith(submit, err, "書き込む", async () => {
+        await store.addPost(post);
+        body.value = "";
+      });
+    });
+
+    view = { update: () => updateThread(id) };
+    updateThread(id);
+  }
+
+  function updateThread(id) {
+    const titleEl = app.querySelector("#th-title");
+    const postsEl = app.querySelector("#posts");
+    const form = app.querySelector("#reply");
+    if (!titleEl) return;
+    if (!loaded) return;
+    const thread = threads.find((t) => t.id === id);
+    if (!thread) {
+      titleEl.textContent = "スレッドが見つかりません";
+      postsEl.innerHTML = `<p class="empty" style="padding:8px 0">削除されたか、URLが間違っているようです。一覧から選び直してください。</p>`;
+      form.hidden = true;
+      return;
+    }
+    form.hidden = false;
+    titleEl.textContent = thread.title;
+    document.title = `${thread.title}｜ひろば掲示板`;
+    postsEl.innerHTML = postsOf(id).map((p, i) => `
+      <article class="post" id="p-${i + 1}">
+        <div class="post-head">
+          <button type="button" class="no" data-no="${i + 1}" title="この書き込みに返信">${i + 1}</button>
+          <span class="name">${esc(p.name || DEFAULT_NAME)}</span>
+          <time class="date" datetime="${new Date(p.createdAt).toISOString()}">${fmtDate(p.createdAt)}</time>
+        </div>
+        <div class="body">${renderBody(p.body)}</div>
+      </article>`).join("");
+  }
+
+  function route() {
+    const m = location.hash.match(/^#\/t\/([^/]+)$/);
+    document.title = "ひろば掲示板";
+    if (m) renderThread(decodeURIComponent(m[1])); else renderList();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", () => {
+    if (/^#p-\d+$/.test(location.hash)) return;
+    route();
+  });
+
+  // ---- boot ------------------------------------------------------------
+  async function boot() {
+    route();
+    let db = null;
+    try {
+      if (window.claude && typeof window.claude.use === "function") db = await window.claude.use("db");
+    } catch { db = null; }
+    store = db ? makeDbStore(db) : makeLocalStore();
+    modeEl.textContent = store.shared ? "みんなで共有中" : "この端末だけに保存（お試しモード）";
+    modeEl.classList.toggle("shared", store.shared);
+
+    let gotThreads = false, gotPosts = false;
+    const refresh = () => { loaded = gotThreads && gotPosts; if (view) view.update(); };
+    store.subscribe(
+      (ts) => { threads = ts; gotThreads = true; refresh(); },
+      (ps) => { posts = ps; gotPosts = true; refresh(); },
+      (e) => { noticeEl.textContent = errMsg(e); noticeEl.hidden = false; }
+    );
+    // 相対時刻（「3分前」）を1分ごとに更新
+    setInterval(() => { if (view && !app.querySelector("#reply")) view.update(); }, 60000);
+  }
+  boot();
+})();
+</script>
