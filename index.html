@@ -132,6 +132,25 @@
     font-size: 13px;
   }
   .gate a { font-weight: 700; }
+  .btn.google {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    background: var(--field);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+  .btn.google svg { width: 18px; height: 18px; flex: none; }
+  .or {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .notice {
     margin: 0;
     padding: 8px 12px;
@@ -735,11 +754,37 @@
     }
   }
 
+  const GOOGLE_ICON = `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+
+  // Googleで続ける（ログインと新規登録で共通。初回ならこれで登録も済む）
+  function googleBlock() {
+    return `
+      <button type="button" class="btn google" id="google-btn">${GOOGLE_ICON}Googleで続ける</button>
+      <p class="err" id="google-err" role="alert"></p>
+      <div class="or">またはメールアドレスで</div>`;
+  }
+  function bindGoogle() {
+    const btn = app.querySelector("#google-btn");
+    const err = app.querySelector("#google-err");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      if (!sbClient) { err.textContent = "今はログインできません（オフラインのお試しモードです）。"; return; }
+      btn.disabled = true;
+      const { error } = await sbClient.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: location.origin + location.pathname },
+      });
+      if (error) { err.textContent = authErrMsg(error); btn.disabled = false; }
+      // 成功時はGoogleの画面へ移動するので、ここでは何もしない
+    });
+  }
+
   function renderLogin() {
     app.innerHTML = `
       <a class="back" href="#/">← 一覧へ</a>
       <form class="form" id="login-form" novalidate>
         <h1>ログイン</h1>
+        ${googleBlock()}
         <div class="field"><label for="lg-email">メールアドレス</label><input id="lg-email" type="email" autocomplete="email"></div>
         <div class="field"><label for="lg-pass">パスワード</label><input id="lg-pass" type="password" autocomplete="current-password"></div>
         <div class="row">
@@ -763,6 +808,7 @@
         location.hash = "#/";
       }, authErrMsg);
     });
+    bindGoogle();
     view = null;
   }
 
@@ -771,6 +817,7 @@
       <a class="back" href="#/">← 一覧へ</a>
       <form class="form" id="signup-form" novalidate>
         <h1>新規登録</h1>
+        ${googleBlock()}
         <div class="field name-field"><label for="su-name">表示名</label><input id="su-name" maxlength="24" placeholder="${DEFAULT_NAME}"></div>
         <div class="field"><label for="su-email">メールアドレス</label><input id="su-email" type="email" autocomplete="email"></div>
         <div class="field"><label for="su-pass">パスワード</label><input id="su-pass" type="password" autocomplete="new-password" minlength="6"></div>
@@ -807,6 +854,7 @@
           <div class="gate"><p>確認メールを送りました。<br>メール内のリンクを開いて認証を済ませてください。開くとそのままログイン状態になります（うまくいかない場合は<a href="#/login">ログイン</a>し直してください）。</p></div>`;
       }, authErrMsg);
     });
+    bindGoogle();
     view = null;
   }
 
@@ -898,6 +946,13 @@
 
   // ---- boot ------------------------------------------------------------
   async function boot() {
+    // Googleログインから失敗して戻ってきたとき（#error=...）は理由を出してから一覧へ
+    if (/[#&]error_description=/.test(location.hash)) {
+      const p = new URLSearchParams(location.hash.slice(1));
+      noticeEl.textContent = "Googleでのログインに失敗しました：" + (p.get("error_description") || "不明なエラー");
+      noticeEl.hidden = false;
+      history.replaceState(null, "", location.pathname + location.search);
+    }
     route();
     let client = null;
     try {
