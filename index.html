@@ -110,6 +110,28 @@
     background: var(--muted);
   }
   .mode.shared::before { background: var(--name); }
+  .authbar { font-size: 13px; color: var(--muted); }
+  .authbar a { color: var(--link); }
+  .linklike {
+    font: inherit;
+    font-size: inherit;
+    color: var(--link);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .gate {
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    padding: 20px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .gate a { font-weight: 700; }
   .notice {
     margin: 0;
     padding: 8px 12px;
@@ -253,7 +275,10 @@
 <div class="wrap">
   <header class="top">
     <a class="logo" href="#/">ひろば掲示板</a>
-    <span class="mode" id="mode">接続中…</span>
+    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <span class="mode" id="mode">接続中…</span>
+      <span class="authbar" id="authbar"></span>
+    </div>
   </header>
   <p class="notice" id="notice" role="alert" hidden></p>
   <main id="app" class="wrap" style="padding:0"></main>
@@ -279,6 +304,9 @@
   let posts = [];
   let loaded = false;
   let view = null;
+  let sbClient = null;
+  let session = null;
+  let profile = null;
 
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
@@ -305,17 +333,17 @@
   }
 
   function cleanThread(t) {
-    return { id: t.id, title: str(t.title, 60) || "(無題)", name: str(t.name, 24), createdAt: num(t.createdAt) };
+    return { id: t.id, title: str(t.title, 60) || "(無題)", name: str(t.name, 24), createdAt: num(t.createdAt), userId: t.userId || null };
   }
   function cleanPost(p) {
-    return { id: p.id, threadId: str(p.threadId, 200), name: str(p.name, 24), body: str(p.body, 2000), createdAt: num(p.createdAt) };
+    return { id: p.id, threadId: str(p.threadId, 200), name: str(p.name, 24), body: str(p.body, 2000), createdAt: num(p.createdAt), userId: p.userId || null };
   }
-  // Supabaseの行（id/created_at/thread_id）を、アプリ内の形に詰め替える
+  // Supabaseの行（id/created_at/thread_id/user_id）を、アプリ内の形に詰め替える
   function fromSbThread(row) {
-    return cleanThread({ id: String(row.id), title: row.title, name: row.name, createdAt: Date.parse(row.created_at) || Date.now() });
+    return cleanThread({ id: String(row.id), title: row.title, name: row.name, createdAt: Date.parse(row.created_at) || Date.now(), userId: row.user_id });
   }
   function fromSbPost(row) {
-    return cleanPost({ id: String(row.id), threadId: String(row.thread_id), name: row.name, body: row.body, createdAt: Date.parse(row.created_at) || Date.now() });
+    return cleanPost({ id: String(row.id), threadId: String(row.thread_id), name: row.name, body: row.body, createdAt: Date.parse(row.created_at) || Date.now(), userId: row.user_id });
   }
   function postsOf(id) {
     return posts
@@ -328,6 +356,7 @@
     switch (code) {
       case "23514": return "文字数が多すぎるか、内容が条件を満たしていません。短くしてもう一度お試しください。";
       case "23503": return "このスレッドは見つかりませんでした。削除された可能性があります。一覧から選び直してください。";
+      case "42501": return "ログインしていないか、権限がありません。ログインしなおしてください。";
       case "network": return "通信エラーです。ネットワーク接続を確かめて、もう一度お試しください。";
       case "quota_exceeded": return "保存できる件数の上限に達しました。古いスレッドを整理してから書き込んでください。";
       case "invalid_argument": return "この共有設定では書き込めません（閲覧のみになっています）。";
@@ -338,6 +367,20 @@
       case "capability_removed": return "掲示板との接続が切れました。ページを再読み込みしてください。";
       default: return "書き込めませんでした。通信状態を確かめて、もう一度お試しください。";
     }
+  }
+
+  // ログイン・新規登録専用のエラーメッセージ（Supabase Authのエラーは形が違うので分ける）
+  function authErrMsg(e) {
+    const code = e && e.code;
+    const msg = (e && e.message) || "";
+    if (code === "network") return "通信エラーです。ネットワーク接続を確かめて、もう一度お試しください。";
+    if (code === "invalid_credentials" || /Invalid login credentials/i.test(msg)) return "メールアドレスかパスワードが違います。";
+    if (code === "email_not_confirmed" || /Email not confirmed/i.test(msg)) return "メールの確認がまだ済んでいません。届いたメールのリンクを開いてから、もう一度お試しください。";
+    if (code === "user_already_exists" || /already registered/i.test(msg)) return "そのメールアドレスはすでに登録されています。ログインをお試しください。";
+    if (code === "weak_password" || /Password should be at least/i.test(msg)) return "パスワードは6文字以上にしてください。";
+    if (code === "over_email_send_rate_limit" || /rate limit/i.test(msg)) return "メール送信が混み合っています。少し待ってからもう一度お試しください。";
+    if (/validate email address/i.test(msg)) return "メールアドレスの形式が正しくないようです。";
+    return "処理できませんでした。通信状態を確かめて、もう一度お試しください。";
   }
 
   // ---- stores ----------------------------------------------------------
@@ -381,12 +424,12 @@
           .subscribe();
       },
       async addThread(thread, first) {
-        const row = await retryOnce(() => sb(client.from("threads").insert({ title: thread.title, name: thread.name }).select().single()));
-        await retryOnce(() => sb(client.from("posts").insert({ thread_id: row.id, name: first.name, body: first.body })));
+        const row = await retryOnce(() => sb(client.from("threads").insert({ title: thread.title, name: thread.name, user_id: thread.userId || null }).select().single()));
+        await retryOnce(() => sb(client.from("posts").insert({ thread_id: row.id, name: first.name, body: first.body, user_id: first.userId || null })));
         return String(row.id);
       },
       async addPost(post) {
-        await retryOnce(() => sb(client.from("posts").insert({ thread_id: Number(post.threadId), name: post.name, body: post.body })));
+        await retryOnce(() => sb(client.from("posts").insert({ thread_id: Number(post.threadId), name: post.name, body: post.body, user_id: post.userId || null })));
       },
     };
   }
@@ -451,22 +494,30 @@
     });
   }
 
-  async function submitWith(button, errEl, label, fn) {
+  async function submitWith(button, errEl, label, fn, fmt = errMsg) {
     if (!store) { errEl.textContent = "準備中です。少し待ってからもう一度お試しください。"; return; }
     button.disabled = true;
     button.textContent = "送信中…";
     errEl.textContent = "";
     try { await fn(); }
-    catch (e) { errEl.textContent = errMsg(e); }
+    catch (e) { errEl.textContent = fmt(e); }
     finally { button.disabled = false; button.textContent = label; }
   }
 
+  // Supabaseに接続していてもログインしていなければ書き込み不可。ローカルお試しモードなら誰でも書ける
+  function canPost() { return !sbClient || !!session; }
+  function myId() { return (session && session.user && session.user.id) || null; }
+
   function renderList() {
+    const allowed = canPost();
     app.innerHTML = `
       <div class="list-head">
         <h1>スレッド一覧<span class="sub" id="list-sub"></span></h1>
-        <button class="btn" id="toggle-new" type="button" aria-expanded="false" aria-controls="new-thread">スレッドを立てる</button>
+        ${allowed
+          ? `<button class="btn" id="toggle-new" type="button" aria-expanded="false" aria-controls="new-thread">スレッドを立てる</button>`
+          : `<a class="btn ghost" href="#/login">ログインして立てる</a>`}
       </div>
+      ${allowed ? `
       <form class="form" id="new-thread" hidden novalidate>
         <h2>新しいスレッド</h2>
         <div class="field"><label for="nt-title">タイトル</label><input id="nt-title" maxlength="60" placeholder="例：おすすめの本を教えて"></div>
@@ -479,42 +530,45 @@
             <button type="submit" class="btn" id="nt-submit">立てる</button>
           </div>
         </div>
-      </form>
+      </form>` : ""}
       <ol class="threads" id="threads"></ol>`;
 
-    const form = app.querySelector("#new-thread");
-    const toggle = app.querySelector("#toggle-new");
-    const title = form.querySelector("#nt-title");
-    const name = form.querySelector("#nt-name");
-    const body = form.querySelector("#nt-body");
-    const err = form.querySelector("#nt-err");
-    const submit = form.querySelector("#nt-submit");
-    name.value = lsGet(NAME_KEY) || "";
+    if (allowed) {
+      const form = app.querySelector("#new-thread");
+      const toggle = app.querySelector("#toggle-new");
+      const title = form.querySelector("#nt-title");
+      const name = form.querySelector("#nt-name");
+      const body = form.querySelector("#nt-body");
+      const err = form.querySelector("#nt-err");
+      const submit = form.querySelector("#nt-submit");
+      name.value = (profile && profile.display_name) || lsGet(NAME_KEY) || "";
 
-    const setOpen = (open) => {
-      form.hidden = !open;
-      toggle.hidden = open;
-      toggle.setAttribute("aria-expanded", String(open));
-      if (open) title.focus(); else toggle.focus();
-    };
-    toggle.addEventListener("click", () => setOpen(true));
-    form.querySelector("#nt-cancel").addEventListener("click", () => setOpen(false));
-    bindCtrlEnter(body, form);
+      const setOpen = (open) => {
+        form.hidden = !open;
+        toggle.hidden = open;
+        toggle.setAttribute("aria-expanded", String(open));
+        if (open) title.focus(); else toggle.focus();
+      };
+      toggle.addEventListener("click", () => setOpen(true));
+      form.querySelector("#nt-cancel").addEventListener("click", () => setOpen(false));
+      bindCtrlEnter(body, form);
 
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const t = title.value.trim();
-      const b = body.value.trim();
-      if (!t) { err.textContent = "タイトルを入力してください。"; title.focus(); return; }
-      if (!b) { err.textContent = "本文を入力してください。"; body.focus(); return; }
-      const n = name.value.trim() || DEFAULT_NAME;
-      lsSet(NAME_KEY, name.value.trim());
-      const now = Date.now();
-      submitWith(submit, err, "立てる", async () => {
-        const id = await store.addThread({ title: t, name: n, createdAt: now }, { name: n, body: b, createdAt: now });
-        location.hash = "#/t/" + id;
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const t = title.value.trim();
+        const b = body.value.trim();
+        if (!t) { err.textContent = "タイトルを入力してください。"; title.focus(); return; }
+        if (!b) { err.textContent = "本文を入力してください。"; body.focus(); return; }
+        const n = name.value.trim() || DEFAULT_NAME;
+        lsSet(NAME_KEY, name.value.trim());
+        const now = Date.now();
+        const uid = myId();
+        submitWith(submit, err, "立てる", async () => {
+          const id = await store.addThread({ title: t, name: n, createdAt: now, userId: uid }, { name: n, body: b, createdAt: now, userId: uid });
+          location.hash = "#/t/" + id;
+        });
       });
-    });
+    }
 
     view = { update: updateList };
     updateList();
@@ -553,12 +607,14 @@
   }
 
   function renderThread(id) {
+    const allowed = canPost();
     app.innerHTML = `
       <a class="back" href="#/">← スレッド一覧へ</a>
       <article class="thread">
         <h1 class="thread-title" id="th-title">読み込み中…</h1>
         <div class="posts" id="posts"></div>
       </article>
+      ${allowed ? `
       <form class="form" id="reply" novalidate>
         <h2>このスレッドに書き込む</h2>
         <div class="field name-field"><label for="rp-name">名前</label><input id="rp-name" maxlength="24" placeholder="${DEFAULT_NAME}"></div>
@@ -568,47 +624,64 @@
           <button type="submit" class="btn" id="rp-submit">書き込む</button>
         </div>
         <p class="err" id="rp-err" role="alert"></p>
-      </form>`;
+      </form>` : `
+      <div class="gate"><p>書き込むには<a href="#/login">ログイン</a>してください。（<a href="#/signup">新規登録</a>もこちらから）</p></div>`}`;
 
     const postsEl = app.querySelector("#posts");
     const form = app.querySelector("#reply");
-    const name = form.querySelector("#rp-name");
-    const body = form.querySelector("#rp-body");
-    const err = form.querySelector("#rp-err");
-    const submit = form.querySelector("#rp-submit");
-    name.value = lsGet(NAME_KEY) || "";
-    bindCtrlEnter(body, form);
 
-    postsEl.addEventListener("click", (e) => {
-      const no = e.target.closest(".no");
-      if (no) {
-        const prefix = body.value && !body.value.endsWith("\n") ? "\n" : "";
-        body.value += `${prefix}>>${no.dataset.no}\n`;
-        body.focus();
-        return;
-      }
-      const anchor = e.target.closest(".anchor");
-      if (anchor) {
-        e.preventDefault();
-        const target = document.getElementById("p-" + anchor.dataset.no);
-        if (!target) return;
-        target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
-        target.classList.add("flash");
-        setTimeout(() => target.classList.remove("flash"), 1600);
-      }
-    });
+    if (allowed) {
+      const name = form.querySelector("#rp-name");
+      const body = form.querySelector("#rp-body");
+      const err = form.querySelector("#rp-err");
+      const submit = form.querySelector("#rp-submit");
+      name.value = (profile && profile.display_name) || lsGet(NAME_KEY) || "";
+      bindCtrlEnter(body, form);
 
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const b = body.value.trim();
-      if (!b) { err.textContent = "本文を入力してください。"; body.focus(); return; }
-      lsSet(NAME_KEY, name.value.trim());
-      const post = { threadId: id, name: name.value.trim() || DEFAULT_NAME, body: b, createdAt: Date.now() };
-      submitWith(submit, err, "書き込む", async () => {
-        await store.addPost(post);
-        body.value = "";
+      postsEl.addEventListener("click", (e) => {
+        const no = e.target.closest(".no");
+        if (no) {
+          const prefix = body.value && !body.value.endsWith("\n") ? "\n" : "";
+          body.value += `${prefix}>>${no.dataset.no}\n`;
+          body.focus();
+          return;
+        }
+        const anchor = e.target.closest(".anchor");
+        if (anchor) {
+          e.preventDefault();
+          const target = document.getElementById("p-" + anchor.dataset.no);
+          if (!target) return;
+          target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+          target.classList.add("flash");
+          setTimeout(() => target.classList.remove("flash"), 1600);
+        }
       });
-    });
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const b = body.value.trim();
+        if (!b) { err.textContent = "本文を入力してください。"; body.focus(); return; }
+        lsSet(NAME_KEY, name.value.trim());
+        const post = { threadId: id, name: name.value.trim() || DEFAULT_NAME, body: b, createdAt: Date.now(), userId: myId() };
+        submitWith(submit, err, "書き込む", async () => {
+          await store.addPost(post);
+          body.value = "";
+        });
+      });
+    } else {
+      // 引用番号クリックでの本文挿入先が無いので、番号クリックはリンク（アンカー移動）だけ効かせる
+      postsEl.addEventListener("click", (e) => {
+        const anchor = e.target.closest(".anchor");
+        if (anchor) {
+          e.preventDefault();
+          const target = document.getElementById("p-" + anchor.dataset.no);
+          if (!target) return;
+          target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+          target.classList.add("flash");
+          setTimeout(() => target.classList.remove("flash"), 1600);
+        }
+      });
+    }
 
     view = { update: () => updateThread(id) };
     updateThread(id);
@@ -624,10 +697,10 @@
     if (!thread) {
       titleEl.textContent = "スレッドが見つかりません";
       postsEl.innerHTML = `<p class="empty" style="padding:8px 0">削除されたか、URLが間違っているようです。一覧から選び直してください。</p>`;
-      form.hidden = true;
+      if (form) form.hidden = true;
       return;
     }
-    form.hidden = false;
+    if (form) form.hidden = false;
     titleEl.textContent = thread.title;
     document.title = `${thread.title}｜ひろば掲示板`;
     postsEl.innerHTML = postsOf(id).map((p, i) => `
@@ -641,10 +714,181 @@
       </article>`).join("");
   }
 
+  // ---- auth --------------------------------------------------------------
+  async function loadProfile() {
+    if (!sbClient || !session) { profile = null; return; }
+    try {
+      const { data } = await sbClient.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+      profile = data || null;
+    } catch { profile = null; }
+  }
+
+  function updateAuthbar() {
+    const bar = document.getElementById("authbar");
+    if (!bar || !sbClient) { if (bar) bar.innerHTML = ""; return; }
+    if (session) {
+      const dn = esc((profile && profile.display_name) || DEFAULT_NAME);
+      bar.innerHTML = `<span>${dn} さん</span> ・ <a href="#/mypage">マイページ</a> ・ <button type="button" class="linklike" id="logout-btn">ログアウト</button>`;
+      bar.querySelector("#logout-btn").addEventListener("click", () => sbClient.auth.signOut());
+    } else {
+      bar.innerHTML = `<a href="#/login">ログイン</a> ・ <a href="#/signup">新規登録</a>`;
+    }
+  }
+
+  function renderLogin() {
+    app.innerHTML = `
+      <a class="back" href="#/">← 一覧へ</a>
+      <form class="form" id="login-form" novalidate>
+        <h1>ログイン</h1>
+        <div class="field"><label for="lg-email">メールアドレス</label><input id="lg-email" type="email" autocomplete="email"></div>
+        <div class="field"><label for="lg-pass">パスワード</label><input id="lg-pass" type="password" autocomplete="current-password"></div>
+        <div class="row">
+          <p class="err" id="lg-err" role="alert"></p>
+          <button type="submit" class="btn" id="lg-submit">ログイン</button>
+        </div>
+        <p class="hint">アカウントがない方は <a href="#/signup">新規登録</a></p>
+      </form>`;
+    const form = app.querySelector("#login-form");
+    const email = form.querySelector("#lg-email");
+    const pass = form.querySelector("#lg-pass");
+    const err = form.querySelector("#lg-err");
+    const submit = form.querySelector("#lg-submit");
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!sbClient) { err.textContent = "今はログインできません（オフラインのお試しモードです）。"; return; }
+      if (!email.value.trim() || !pass.value) { err.textContent = "メールアドレスとパスワードを入力してください。"; return; }
+      submitWith(submit, err, "ログイン", async () => {
+        const { error } = await sbClient.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
+        if (error) throw { code: error.code, message: error.message };
+        location.hash = "#/";
+      }, authErrMsg);
+    });
+    view = null;
+  }
+
+  function renderSignup() {
+    app.innerHTML = `
+      <a class="back" href="#/">← 一覧へ</a>
+      <form class="form" id="signup-form" novalidate>
+        <h1>新規登録</h1>
+        <div class="field name-field"><label for="su-name">表示名</label><input id="su-name" maxlength="24" placeholder="${DEFAULT_NAME}"></div>
+        <div class="field"><label for="su-email">メールアドレス</label><input id="su-email" type="email" autocomplete="email"></div>
+        <div class="field"><label for="su-pass">パスワード</label><input id="su-pass" type="password" autocomplete="new-password" minlength="6"></div>
+        <div class="row">
+          <p class="err" id="su-err" role="alert"></p>
+          <button type="submit" class="btn" id="su-submit">登録する</button>
+        </div>
+        <p class="hint">登録済みの方は <a href="#/login">ログイン</a></p>
+      </form>`;
+    const form = app.querySelector("#signup-form");
+    const name = form.querySelector("#su-name");
+    const email = form.querySelector("#su-email");
+    const pass = form.querySelector("#su-pass");
+    const err = form.querySelector("#su-err");
+    const submit = form.querySelector("#su-submit");
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!sbClient) { err.textContent = "今は登録できません（オフラインのお試しモードです）。"; return; }
+      if (!email.value.trim() || !pass.value) { err.textContent = "メールアドレスとパスワードを入力してください。"; return; }
+      if (pass.value.length < 6) { err.textContent = "パスワードは6文字以上にしてください。"; return; }
+      submitWith(submit, err, "登録する", async () => {
+        const displayName = name.value.trim() || DEFAULT_NAME;
+        const { error } = await sbClient.auth.signUp({
+          email: email.value.trim(),
+          password: pass.value,
+          options: {
+            data: { display_name: displayName },
+            emailRedirectTo: location.origin + location.pathname,
+          },
+        });
+        if (error) throw { code: error.code, message: error.message };
+        app.innerHTML = `
+          <a class="back" href="#/">← 一覧へ</a>
+          <div class="gate"><p>確認メールを送りました。<br>メール内のリンクを開いて認証を済ませてください。開くとそのままログイン状態になります（うまくいかない場合は<a href="#/login">ログイン</a>し直してください）。</p></div>`;
+      }, authErrMsg);
+    });
+    view = null;
+  }
+
+  function renderMyPage() {
+    if (!sbClient) {
+      app.innerHTML = `<div class="gate"><p>マイページはSupabaseに接続しているときだけ使えます（今はオフラインのお試しモードです）。</p></div>`;
+      view = null;
+      return;
+    }
+    if (!session) {
+      app.innerHTML = `<div class="gate"><p>マイページを見るには<a href="#/login">ログイン</a>してください。</p></div>`;
+      view = null;
+      return;
+    }
+    app.innerHTML = `
+      <a class="back" href="#/">← 一覧へ</a>
+      <h1>マイページ</h1>
+      <div class="form">
+        <div class="field"><label>メールアドレス</label><p style="margin:0">${esc(session.user.email || "")}</p></div>
+        <div class="field name-field"><label for="mp-name">表示名</label><input id="mp-name" maxlength="24"></div>
+        <div class="row">
+          <p class="err" id="mp-err" role="alert"></p>
+          <button type="button" class="btn" id="mp-save">保存する</button>
+        </div>
+      </div>
+      <h2>自分の書き込み</h2>
+      <ol class="threads" id="mp-list"><li class="empty">読み込み中…</li></ol>
+      <button type="button" class="btn ghost" id="mp-logout">ログアウトする</button>`;
+
+    const nameInput = app.querySelector("#mp-name");
+    const err = app.querySelector("#mp-err");
+    const saveBtn = app.querySelector("#mp-save");
+    nameInput.value = (profile && profile.display_name) || "";
+
+    saveBtn.addEventListener("click", () => {
+      const dn = nameInput.value.trim();
+      if (!dn) { err.textContent = "表示名を入力してください。"; return; }
+      submitWith(saveBtn, err, "保存する", async () => {
+        const { error } = await sbClient.from("profiles").update({ display_name: dn }).eq("id", session.user.id);
+        if (error) throw { code: error.code, message: error.message };
+        profile = Object.assign({}, profile, { display_name: dn });
+        updateAuthbar();
+      });
+    });
+
+    app.querySelector("#mp-logout").addEventListener("click", () => sbClient.auth.signOut());
+
+    view = { update: updateMyPageList };
+    updateMyPageList();
+  }
+
+  function updateMyPageList() {
+    const list = app.querySelector("#mp-list");
+    if (!list || !session) return;
+    if (!loaded) { list.innerHTML = `<li class="empty">読み込み中…</li>`; return; }
+    const uid = session.user.id;
+    const threadTitle = (tid) => { const t = threads.find((x) => x.id === tid); return t ? t.title : "(削除済みのスレッド)"; };
+    const rows = [
+      ...threads.filter((t) => t.userId === uid).map((t) => ({
+        when: t.createdAt,
+        html: `<a href="#/t/${encodeURIComponent(t.id)}"><span class="t-line"><span class="t-title">${esc(t.title)}</span></span><span class="t-meta">スレッドを立てた・${ago(t.createdAt)}</span></a>`,
+      })),
+      ...posts.filter((p) => p.userId === uid).map((p) => ({
+        when: p.createdAt,
+        html: `<a href="#/t/${encodeURIComponent(p.threadId)}"><span class="t-line"><span class="t-title">${esc(threadTitle(p.threadId))}</span></span><span class="t-meta">書き込み・${ago(p.createdAt)}</span></a>`,
+      })),
+    ].sort((a, b) => b.when - a.when);
+    list.innerHTML = rows.length
+      ? rows.map((r) => `<li>${r.html}</li>`).join("")
+      : `<li class="empty">まだ書き込みがありません。</li>`;
+  }
+
   function route() {
-    const m = location.hash.match(/^#\/t\/([^/]+)$/);
+    const h = location.hash;
     document.title = "ひろば掲示板";
-    if (m) renderThread(decodeURIComponent(m[1])); else renderList();
+    if (h === "#/login") { renderLogin(); }
+    else if (h === "#/signup") { renderSignup(); }
+    else if (h === "#/mypage") { renderMyPage(); }
+    else {
+      const m = h.match(/^#\/t\/([^/]+)$/);
+      if (m) renderThread(decodeURIComponent(m[1])); else renderList();
+    }
     window.scrollTo(0, 0);
   }
   window.addEventListener("hashchange", () => {
@@ -664,9 +908,28 @@
         if (!error) client = c;
       }
     } catch { client = null; }
+    sbClient = client;
     store = client ? makeSupabaseStore(client) : makeLocalStore();
     modeEl.textContent = store.shared ? "みんなで共有中" : "この端末だけに保存（お試しモード）";
     modeEl.classList.toggle("shared", store.shared);
+
+    if (sbClient) {
+      const { data } = await sbClient.auth.getSession();
+      session = data.session;
+      await loadProfile();
+      updateAuthbar();
+      route(); // 最初のrouteはsbClient確定前（ログイン状態不明）に描いているので、判明した今描き直す
+      let first = true;
+      sbClient.auth.onAuthStateChange(async (_event, newSession) => {
+        if (first) { first = false; return; } // getSessionと二重に走るのを避ける
+        session = newSession;
+        await loadProfile();
+        updateAuthbar();
+        route(); // ログイン/ログアウトで書き込みフォームの出し分けが変わるため、今の画面を描き直す
+      });
+    } else {
+      updateAuthbar();
+    }
 
     let gotThreads = false, gotPosts = false;
     const refresh = () => { loaded = gotThreads && gotPosts; if (view) view.update(); };
